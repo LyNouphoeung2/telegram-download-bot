@@ -4,7 +4,7 @@ services:
   - name: bot-worker
     # Use 'worker' since this is a long-running bot, not a web server
     type: worker
-    iinstanceType: nano
+    instanceType: nano
     
     build:
       buildpack:
@@ -22,6 +22,7 @@ services:
         # This links to the Secret you will create in the Koyeb dashboard
 
         valueFrom: my-bot-token
+
 
 
 
