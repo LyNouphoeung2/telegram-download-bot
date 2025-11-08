@@ -6,12 +6,6 @@ services:
     type: worker
     instanceType: micro
     
-    git:
-      # --- IMPORTANT ---
-      # You MUST change this line to your GitHub repository URL
-      repository: github.com/LyNouphoeung2/telegram-download-bot
-      branch: main
-    
     build:
       buildpack:
         # This tells Koyeb to install the ffmpeg system package
@@ -28,5 +22,6 @@ services:
         # This links to the Secret you will create in the Koyeb dashboard
 
         valueFrom: my-bot-token
+
 
 
