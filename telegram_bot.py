@@ -5,10 +5,10 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import yt_dlp
-from telegram import Update
+from telegram import Update, InputMediaPhoto
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes
 )
@@ -36,7 +36,7 @@ DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 # --- CRITICAL: Path to ffmpeg on Koyeb ---
-# នេះនៅតែត្រូវការសម្រាប់ការបញ្ចូលវីដេអូ YouTube។
+# នេះនៅតែត្រូវការសម្រាប់ការបញ្ចូលវីដេអូ។
 FFMPEG_PATH = "/usr/bin/ffmpeg"
 
 # --- ចំណងជើងថ្មីតាមការស្នើសុំ ---
@@ -52,17 +52,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def run_download_blocking(
     url: str, temp_dir: str, loop, context, chat_id, message_id
-) -> Tuple[Optional[Path], dict]:
+) -> Tuple[Optional[Path], List[Path], dict]:
     """
-    មុខងារសម្រាប់ដំណើរការ yt_dlp ក្នុង thread ដោយឡែក។
-    នេះនឹងបញ្ចូល formats ដោយប្រើ FFmpeg បើចាំបាច់ (ឧ. សម្រាប់ YouTube)។
+    Synchronous function to run yt_dlp in a separate thread.
+    Handles both videos and photo posts.
     """
     temp_path = Path(temp_dir)
     last_update_time = 0
     last_percent = -1
 
     def progress_hook(d):
-        """Hook ដើម្បីផ្ញើការធ្វើបច្ចុប្បន្នភាពវឌ្ឍនភាពត្រឡប់ទៅ async loop។"""
+        """Hook to send progress updates back to the async loop."""
         nonlocal last_update_time, last_percent
         if d['status'] == 'downloading':
             current_time = time.time()
@@ -75,7 +75,7 @@ def run_download_blocking(
             except ValueError:
                 percent = 0.0
 
-            # គ្រប់គ្រងការធ្វើបច្ចុប្បន្នភាព
+            # Throttle updates
             if current_time - last_update_time > 2.5 or abs(percent - last_percent) > 10:
                 text = f"កំពុងទាញយក... {percent_str} ⏳"
                 try:
@@ -89,7 +89,7 @@ def run_download_blocking(
                     logger.warning(f"កំហុសក្នុងការផ្ញើការធ្វើបច្ចុប្បន្នភាពវឌ្ឍនភាព: {e}")
         
         elif d['status'] == 'finished':
-            # គ្រប់គ្រងសារក្រោយដំណើរការ (បញ្ចូល)
+            # Handle post-processing (merging) message
             if d.get('postprocessor') == 'Merger':
                 text = "ទាញយករួចរាល់។ កំពុងបញ្ចូលវីដេអូនិងសំឡេង... 🔄"
                 try:
@@ -100,21 +100,11 @@ def run_download_blocking(
                 except Exception as e:
                     logger.warning(f"កំហុសក្នុងការផ្ញើការធ្វើបច្ចុប្បន្នភាពបញ្ចូល: {e}")
 
-    # --- បច្ចុប្បន្នភាព ydl_opts សម្រាប់គុណភាពខ្ពស់ និង FPS ខ្ពស់ ---
-    ydl_opts = {
-        'format': 'bestvideo[height>=1080][fps>=30][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=720][fps>=30][ext=mp4]+bestaudio[ext=m4a]/best',
-        'outtmpl': str(temp_path / "%(id)s.%(ext)s"),
-        'paths': {"home": temp_dir, "temp": temp_dir},
-        'ffmpeg_location': FFMPEG_PATH,  # នៅតែត្រូវការសម្រាប់ការបញ្ចូល
-        'progress_hooks': [progress_hook],
-        'postprocessors': [{
-            'key': 'FFmpegVideoRemuxer',
-            'preferedformat': 'mp4',
-        }],
-        'nocheckcertificate': True,  # មិនពិនិត្យ SSL certificate
+    # Common opts
+    common_opts = {
+        'nocheckcertificate': True,
         'quiet': True,
         'no_warnings': True,
-        # --- បន្ថែមសម្រាប់ភាពទំនើប ---
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'extractor_retries': 5,
         'retry_sleep': 5,
@@ -122,28 +112,64 @@ def run_download_blocking(
         'max_sleep_interval': 5,
         'socket_timeout': 30,
         'fragment_retries': 10,
+        'paths': {"home": temp_dir, "temp": temp_dir},
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        # បន្ថែមការពន្យារពេលតិចតួច
-        time.sleep(2) 
-        info = ydl.extract_info(url, download=True)
-        
-        # រកឯកសារដែលបានទាញយក
-        video_file = Path(ydl.prepare_filename(info))
-        
-        if not video_file.exists():
-            # ជំនួយក្នុងករណី remuxing
-            video_file = temp_path / f"{info['id']}.mp4"
-            if not video_file.exists():
-                logger.error(f"ឯកសារដែលបានទាញយកមិនត្រូវបានរកឃើញ។ រំពឹង: {video_file}")
-                raise FileNotFoundError(f"មិនអាចរកឯកសារដែលបានទាញយកសម្រាប់ id {info['id']}")
+    # First, extract info without download
+    ydl_opts_info = common_opts.copy()
+    with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+        time.sleep(2)
+        info = ydl.extract_info(url, download=False)
 
-        return video_file, info
+    # Check if it's a video or photo post
+    is_video = any(f.get('vcodec', 'none') != 'none' for f in info.get('formats', []))
+
+    if is_video:
+        # Download video
+        ydl_opts = common_opts.copy()
+        ydl_opts.update({
+            'format': 'bestvideo[height>=1080][fps>=30][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=720][fps>=30][ext=mp4]+bestaudio[ext=m4a]/best',
+            'outtmpl': str(temp_path / "%(id)s.%(ext)s"),
+            'ffmpeg_location': FFMPEG_PATH,
+            'progress_hooks': [progress_hook],
+            'postprocessors': [{
+                'key': 'FFmpegVideoRemuxer',
+                'preferedformat': 'mp4',
+            }],
+        })
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        # Find video file
+        video_files = list(temp_path.glob('*.mp4'))
+        video_file = video_files[0] if video_files else None
+        images = []
+
+    else:
+        # Download images (thumbnails)
+        ydl_opts = common_opts.copy()
+        ydl_opts.update({
+            'outtmpl': str(temp_path / "%(id)s.%(ext)s"),
+            'write_all_thumbnails': True,
+            'skip_download': True,
+            'progress_hooks': [progress_hook],
+        })
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        # Find image files
+        images = list(temp_path.glob('*.jpg')) + list(temp_path.glob('*.jpeg')) + list(temp_path.glob('*.png'))
+        images.sort(key=lambda p: p.name)
+        video_file = None
+
+    if video_file is None and not images:
+        raise FileNotFoundError("No video or images found after download")
+
+    return video_file, images, info
 
 
 async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """ទាញយកវីដេអូពីតំណ និងផ្ញើត្រឡប់ទៅអ្នកប្រើ។"""
+    """ទាញយកវីដេអូឬរូបភាពពីតំណ និងផ្ញើត្រឡប់ទៅអ្នកប្រើ។"""
     url = update.message.text.strip()
     if not url.startswith(("http://", "https://")):
         await update.message.reply_text("សូមផ្ញើតំណដែលត្រឹមត្រូវចាប់ផ្តើមដោយ http:// ឬ https://។")
@@ -158,6 +184,7 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     temp_dir = None
     video_file = None
+    images = []
     info = None
 
     try:
@@ -170,7 +197,7 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             text="កំពុងចាប់ផ្តើមទាញយក... 0% ⏳",
         )
 
-        video_file, info = await asyncio.to_thread(
+        video_file, images, info = await asyncio.to_thread(
             run_download_blocking,
             url,
             temp_dir,
@@ -183,50 +210,59 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
             message_id=status_message.message_id,
-            text="ទាញយករួចរាល់។ កំពុងផ្ញើវីដេអូ... ✅",
+            text="ទាញយករួចរាល់។ កំពុងផ្ញើ... ✅",
         )
 
-        file_size_mb = video_file.stat().st_size / (1024 * 1024)
+        if video_file:
+            file_size_mb = video_file.stat().st_size / (1024 * 1024)
 
-        if file_size_mb <= FILE_SIZE_LIMIT_MB:
-            logger.info(f"កំពុងផ្ញើវីដេអូ: {video_file} (ទំហំ: {file_size_mb:.2f} MB)")
+            if file_size_mb <= FILE_SIZE_LIMIT_MB:
+                logger.info(f"កំពុងផ្ញើវីដេអូ: {video_file} (ទំហំ: {file_size_mb:.2f} MB)")
 
-            # ផ្ញើសារខាងលើវីដេអូ
-            await update.message.reply_text("វីដេអូមានគុណភាពខ្ពស់របស់អ្នកត្រូវបានទាញយកជោគជ័យហើយ💚💚")
+                await update.message.reply_text("វីដេអូមានគុណភាពខ្ពស់របស់អ្នកត្រូវបានទាញយកជោគជ័យហើយ💚💚")
 
-            with open(video_file, "rb") as f:
-                # --- ផ្ញើវីដេអូជាមួយចំណងជើងថ្មី ---
-                await update.message.reply_video(
-                    video=f,
-                    caption=BOT_CAPTION,
-                    parse_mode=ParseMode.MARKDOWN,
-                    supports_streaming=True,
-                    read_timeout=100,
-                    write_timeout=100,
-                )
+                with open(video_file, "rb") as f:
+                    await update.message.reply_video(
+                        video=f,
+                        caption=BOT_CAPTION,
+                        parse_mode=ParseMode.MARKDOWN,
+                        supports_streaming=True,
+                        read_timeout=100,
+                        write_timeout=100,
+                    )
+
+                await update.message.reply_text("បើអ្នកចង់ទាញយកវីដេអូផ្សេងទៀត សូមផ្ញើរ Link មកខ្ញុំ💚💚")
             
-            # លុបសារស្ថានភាព "ទាញយករួចរាល់"
-            await context.bot.delete_message(
-                chat_id=status_message.chat_id,
-                message_id=status_message.message_id
-            )
+            else:
+                # For videos > 50 MB
+                permanent_path = DOWNLOAD_DIR / video_file.name
+                shutil.move(video_file, permanent_path)
 
-        else:
-            # សម្រាប់វីដេអូ > 50 MB
-            permanent_path = DOWNLOAD_DIR / video_file.name
-            shutil.move(video_file, permanent_path)
+                await update.message.reply_text(
+                    f"✅ ទាញយករួចរាល់ ប៉ុន្តែឯកសារធំពេកដើម្បីផ្ញើ។\n\n"
+                    f"**ទំហំ:** {file_size_mb:.2f} MB\n"
+                    f"**កំណត់:** {FILE_SIZE_LIMIT_MB} MB\n\n"
+                    f"ឯកសារត្រូវបានរក្សាទុកនៅលើម៉ាស៊ីនមេរបស់បូត (កន្លែងផ្ទុកគឺបណ្តោះអាសន្ន)។",
+                    parse_mode=ParseMode.MARKDOWN
+                )
 
-            await update.message.reply_text(
-                f"✅ ទាញយករួចរាល់ ប៉ុន្តែឯកសារធំពេកដើម្បីផ្ញើ។\n\n"
-                f"**ទំហំ:** {file_size_mb:.2f} MB\n"
-                f"**កំណត់:** {FILE_SIZE_LIMIT_MB} MB\n\n"
-                f"ឯកសារត្រូវបានរក្សាទុកនៅលើម៉ាស៊ីនមេរបស់បូត (កន្លែងផ្ទុកគឺបណ្តោះអាសន្ន)។",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            await context.bot.delete_message(
-                chat_id=status_message.chat_id,
-                message_id=status_message.message_id
-            )
+        elif images:
+            await update.message.reply_text("រូបភាពមានគុណភាពខ្ពស់របស់អ្នកត្រូវបានទាញយកជោគជ័យហើយ💚💚")
+
+            media_group = []
+            for i, img_path in enumerate(images):
+                caption = BOT_CAPTION if i == 0 else None
+                media_group.append(InputMediaPhoto(open(img_path, 'rb'), caption=caption, parse_mode=ParseMode.MARKDOWN if caption else None))
+
+            await update.message.reply_media_group(media=media_group)
+
+            await update.message.reply_text("បើអ្នកចង់ទាញយកវីដេអូផ្សេងទៀត សូមផ្ញើរ Link មកខ្ញុំ💚💚")
+
+        # Delete status message
+        await context.bot.delete_message(
+            chat_id=status_message.chat_id,
+            message_id=status_message.message_id
+        )
 
     except yt_dlp.utils.DownloadError as e:
         logger.error(f"DownloadError: {str(e)}")
