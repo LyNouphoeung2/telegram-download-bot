@@ -40,7 +40,7 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 FFMPEG_PATH = "/usr/bin/ffmpeg"
 
 # --- ចំណងជើងថ្មីតាមការស្នើសុំ ---
-BOT_CAPTION = "ចង់ដោនឡូតវីដេអូសូមចុច @Apple_Downloader_bot"
+BOT_CAPTION = "ដោនឡូតវីដេអូដោយ @Apple_Downloader_bot"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -191,6 +191,9 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if file_size_mb <= FILE_SIZE_LIMIT_MB:
             logger.info(f"កំពុងផ្ញើវីដេអូ: {video_file} (ទំហំ: {file_size_mb:.2f} MB)")
 
+            # ផ្ញើសារខាងលើវីដេអូ
+            await update.message.reply_text("វីដេអូមានគុណភាពខ្ពស់របស់អ្នកត្រូវបានទាញយកជោគជ័យហើយ💚💚")
+
             with open(video_file, "rb") as f:
                 # --- ផ្ញើវីដេអូជាមួយចំណងជើងថ្មី ---
                 await update.message.reply_video(
@@ -275,4 +278,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
