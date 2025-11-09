@@ -39,7 +39,7 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 # This is still required for merging YouTube videos.
 FFMPEG_PATH = "/usr/bin/ffmpeg"
 
-# --- New caption as requested ---
+# --- Updated caption as requested ---
 BOT_CAPTION = "ដោនឡូតវីដេអូដោយ @Apple_Downloader_bot"
 
 
@@ -100,25 +100,35 @@ def run_download_blocking(
                 except Exception as e:
                     logger.warning(f"Error sending merge update: {e}")
 
-    # --- Updated ydl_opts for better YouTube compatibility ---
+    # --- Enhanced ydl_opts for modern YouTube compatibility and efficiency ---
+    # Added user-agent, retries, sleep intervals for better reliability
+    # Updated format selector for optimal quality and compatibility
     ydl_opts = {
-        "format": "bv[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]/bv+ba/b",
-        "outtmpl": str(temp_path / "%(id)s.%(ext)s"),
-        "paths": {"home": temp_dir, "temp": temp_dir},
-        "ffmpeg_location": FFMPEG_PATH, # Still needed for merging
-        "progress_hooks": [progress_hook],
-        "postprocessors": [{
+        'format': 'best[height<=720][ext=mp4]/best[height<=720]/best',
+        'outtmpl': str(temp_path / "%(id)s.%(ext)s"),
+        'paths': {"home": temp_dir, "temp": temp_dir},
+        'ffmpeg_location': FFMPEG_PATH,  # Still needed for merging
+        'progress_hooks': [progress_hook],
+        'postprocessors': [{
             'key': 'FFmpegVideoRemuxer',
             'preferedformat': 'mp4',
         }],
-        "nocheckcertificate": True, # Ignore SSL certificate errors
-        "quiet": True,
-        "no_warnings": True,
+        'nocheckcertificate': True,  # Ignore SSL certificate errors
+        'quiet': True,
+        'no_warnings': True,
+        # --- New: Modern YouTube enhancements ---
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'extractor_retries': 5,  # Retry extractor on failure
+        'retry_sleep': 5,  # Sleep between retries
+        'sleep_interval': 1,  # Random sleep between requests
+        'max_sleep_interval': 5,
+        'socket_timeout': 30,  # Increase timeout
+        'fragment_retries': 10,  # For DASH fragments
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        # Add a small delay
-        time.sleep(1) 
+        # Add a small delay to avoid rate limiting
+        time.sleep(2) 
         info = ydl.extract_info(url, download=True)
         
         # Find the downloaded file
@@ -179,10 +189,10 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             logger.info(f"Sending video: {video_file} (size: {file_size_mb:.2f} MB)")
 
             with open(video_file, "rb") as f:
-                # --- CHANGE: Send video with new caption ---
+                # --- Send video with updated caption ---
                 await update.message.reply_video(
                     video=f,
-                    caption=BOT_CAPTION, # Use the new caption
+                    caption=BOT_CAPTION,  # Updated to @Apple_Downloader_bot
                     parse_mode=ParseMode.MARKDOWN,
                     supports_streaming=True,
                     read_timeout=100,
@@ -215,8 +225,13 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     except yt_dlp.utils.DownloadError as e:
         logger.error(f"DownloadError: {str(e)}")
         error_text = "❌ Error downloading video. The URL might be private or invalid."
-        if "confirm you're not a bot" in str(e):
-            error_text = "❌ YouTube is blocking the download. Please try a different video."
+        error_msg = str(e).lower()
+        if "confirm you're not a bot" in error_msg:
+            error_text = "❌ YouTube is blocking the download. Please try a different video or wait a bit."
+        elif "private video" in error_msg or "unavailable" in error_msg:
+            error_text = "❌ This video is private, age-restricted, or unavailable. Try another one."
+        elif "rate limit" in error_msg or "too many requests" in error_msg:
+            error_text = "❌ Rate limited by YouTube. Please wait 5-10 minutes and try again."
             
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
@@ -246,10 +261,10 @@ def main() -> None:
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    # --- CHANGE: Updated handler to call the renamed function ---
+    # --- Handler for text messages (URLs) ---
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_and_send))
     
-    # --- DELETED: CallbackQueryHandler for audio is removed ---
+    # --- No audio handler ---
 
     logger.info("Starting bot polling...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
