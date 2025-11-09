@@ -14,39 +14,39 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-# Configure logging
+# កំណត់កម្រិត logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# --- Load Bot Token ---
+# --- ផ្ទុក BOT_TOKEN ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     logger.critical("FATAL: BOT_TOKEN environment variable is not set.")
     exit()
 # ----------------------------------------------------
 
-# Telegram bot API file size limit (50 MB)
+# កំណត់ទំហំឯកសាររបស់ Telegram bot API (50 MB)
 FILE_SIZE_LIMIT_MB = 50
 
-# Permanent download directory (ephemeral on Koyeb)
+# ថតទាញយកអចិន្ត្រៃយ៍ (ephemeral on Koyeb)
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 # --- CRITICAL: Path to ffmpeg on Koyeb ---
-# This is still required for merging YouTube videos.
+# នេះនៅតែត្រូវការសម្រាប់ការបញ្ចូលវីដេអូ YouTube។
 FFMPEG_PATH = "/usr/bin/ffmpeg"
 
-# --- Updated caption as requested ---
+# --- ចំណងជើងថ្មីតាមការស្នើសុំ ---
 BOT_CAPTION = "ដោនឡូតវីដេអូដោយ @Apple_Downloader_bot"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a welcome message when the /start command is issued."""
+    """ផ្ញើសារស្វាគមន៍នៅពេលបញ្ជា /start ត្រូវបានប្រើ។"""
     await update.message.reply_text(
-        "Send me a video URL from YouTube, TikTok, or Facebook, and I'll download it!"
+        "សូមផ្ញើតំណភ្ជាប់វីដេអូ TikTok មកខ្ញុំ ហើយខ្ញុំនឹងទាញយកវា!"
     )
 
 
@@ -54,15 +54,15 @@ def run_download_blocking(
     url: str, temp_dir: str, loop, context, chat_id, message_id
 ) -> Tuple[Optional[Path], dict]:
     """
-    Synchronous function to run yt_dlp in a separate thread.
-    This will MERGE formats using FFmpeg if needed (e.g., for YouTube).
+    មុខងារសម្រាប់ដំណើរការ yt_dlp ក្នុង thread ដោយឡែក។
+    នេះនឹងបញ្ចូល formats ដោយប្រើ FFmpeg បើចាំបាច់ (ឧ. សម្រាប់ YouTube)។
     """
     temp_path = Path(temp_dir)
     last_update_time = 0
     last_percent = -1
 
     def progress_hook(d):
-        """Hook to send progress updates back to the async loop."""
+        """Hook ដើម្បីផ្ញើការធ្វើបច្ចុប្បន្នភាពវឌ្ឍនភាពត្រឡប់ទៅ async loop។"""
         nonlocal last_update_time, last_percent
         if d['status'] == 'downloading':
             current_time = time.time()
@@ -75,9 +75,9 @@ def run_download_blocking(
             except ValueError:
                 percent = 0.0
 
-            # Throttle updates
+            # គ្រប់គ្រងការធ្វើបច្ចុប្បន្នភាព
             if current_time - last_update_time > 2.5 or abs(percent - last_percent) > 10:
-                text = f"Download in progress... {percent_str} ⏳"
+                text = f"កំពុងទាញយក... {percent_str} ⏳"
                 try:
                     coro = context.bot.edit_message_text(
                         chat_id=chat_id, message_id=message_id, text=text
@@ -86,72 +86,75 @@ def run_download_blocking(
                     last_update_time = current_time
                     last_percent = percent
                 except Exception as e:
-                    logger.warning(f"Error sending progress update: {e}")
+                    logger.warning(f"កំហុសក្នុងការផ្ញើការធ្វើបច្ចុប្បន្នភាពវឌ្ឍនភាព: {e}")
         
         elif d['status'] == 'finished':
-            # Handle post-processing (merging) message
+            # គ្រប់គ្រងសារក្រោយដំណើរការ (បញ្ចូល)
             if d.get('postprocessor') == 'Merger':
-                text = "Download finished. Merging video and audio... 🔄"
+                text = "ទាញយករួចរាល់។ កំពុងបញ្ចូលវីដេអូនិងសំឡេង... 🔄"
                 try:
                     coro = context.bot.edit_message_text(
                         chat_id=chat_id, message_id=message_id, text=text
                     )
                     asyncio.run_coroutine_threadsafe(coro, loop)
                 except Exception as e:
-                    logger.warning(f"Error sending merge update: {e}")
+                    logger.warning(f"កំហុសក្នុងការផ្ញើការធ្វើបច្ចុប្បន្នភាពបញ្ចូល: {e}")
 
-    # --- Enhanced ydl_opts for modern YouTube compatibility and efficiency ---
-    # Added user-agent, retries, sleep intervals for better reliability
-    # Updated format selector for optimal quality and compatibility
+    # --- បច្ចុប្បន្នភាព ydl_opts សម្រាប់គុណភាពខ្ពស់ និង FPS ខ្ពស់ ---
     ydl_opts = {
-        'format': 'best[height<=720][ext=mp4]/best[height<=720]/best',
+        'format': 'bestvideo[height>=1080][fps>=30][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=720][fps>=30][ext=mp4]+bestaudio[ext=m4a]/best',
         'outtmpl': str(temp_path / "%(id)s.%(ext)s"),
         'paths': {"home": temp_dir, "temp": temp_dir},
-        'ffmpeg_location': FFMPEG_PATH,  # Still needed for merging
+        'ffmpeg_location': FFMPEG_PATH,  # នៅតែត្រូវការសម្រាប់ការបញ្ចូល
         'progress_hooks': [progress_hook],
         'postprocessors': [{
             'key': 'FFmpegVideoRemuxer',
             'preferedformat': 'mp4',
         }],
-        'nocheckcertificate': True,  # Ignore SSL certificate errors
+        'nocheckcertificate': True,  # មិនពិនិត្យ SSL certificate
         'quiet': True,
         'no_warnings': True,
-        # --- New: Modern YouTube enhancements ---
+        # --- បន្ថែមសម្រាប់ភាពទំនើប ---
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'extractor_retries': 5,  # Retry extractor on failure
-        'retry_sleep': 5,  # Sleep between retries
-        'sleep_interval': 1,  # Random sleep between requests
+        'extractor_retries': 5,
+        'retry_sleep': 5,
+        'sleep_interval': 1,
         'max_sleep_interval': 5,
-        'socket_timeout': 30,  # Increase timeout
-        'fragment_retries': 10,  # For DASH fragments
+        'socket_timeout': 30,
+        'fragment_retries': 10,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        # Add a small delay to avoid rate limiting
+        # បន្ថែមការពន្យារពេលតិចតួច
         time.sleep(2) 
         info = ydl.extract_info(url, download=True)
         
-        # Find the downloaded file
+        # រកឯកសារដែលបានទាញយក
         video_file = Path(ydl.prepare_filename(info))
         
         if not video_file.exists():
-            # Fallback in case of remuxing
+            # ជំនួយក្នុងករណី remuxing
             video_file = temp_path / f"{info['id']}.mp4"
             if not video_file.exists():
-                logger.error(f"Downloaded file not found. Expected: {video_file}")
-                raise FileNotFoundError(f"Could not find downloaded file for id {info['id']}")
+                logger.error(f"ឯកសារដែលបានទាញយកមិនត្រូវបានរកឃើញ។ រំពឹង: {video_file}")
+                raise FileNotFoundError(f"មិនអាចរកឯកសារដែលបានទាញយកសម្រាប់ id {info['id']}")
 
         return video_file, info
 
 
 async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Download the video from the URL and send it back to the user."""
+    """ទាញយកវីដេអូពីតំណ និងផ្ញើត្រឡប់ទៅអ្នកប្រើ។"""
     url = update.message.text.strip()
     if not url.startswith(("http://", "https://")):
-        await update.message.reply_text("Please send a valid URL starting with http:// or https://.")
+        await update.message.reply_text("សូមផ្ញើតំណដែលត្រឹមត្រូវចាប់ផ្តើមដោយ http:// ឬ https://។")
         return
 
-    status_message = await update.message.reply_text("Fetching video details... 🔄")
+    # ពិនិត្យថាជា TikTok link ឬអត់
+    if 'tiktok' not in url.lower():
+        await update.message.reply_text("សូមអភ័យទោស ខ្ញុំអាចទាញយកបានតែវីដេអូ TikTok ប៉ុណ្ណោះ")
+        return
+
+    status_message = await update.message.reply_text("កំពុងទាញយកព័ត៌មានវីដេអូ... 🔄")
 
     temp_dir = None
     video_file = None
@@ -164,7 +167,7 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
             message_id=status_message.message_id,
-            text="Download starting... 0% ⏳",
+            text="កំពុងចាប់ផ្តើមទាញយក... 0% ⏳",
         )
 
         video_file, info = await asyncio.to_thread(
@@ -180,41 +183,41 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
             message_id=status_message.message_id,
-            text="Download finished. Sending video... ✅",
+            text="ទាញយករួចរាល់។ កំពុងផ្ញើវីដេអូ... ✅",
         )
 
         file_size_mb = video_file.stat().st_size / (1024 * 1024)
 
         if file_size_mb <= FILE_SIZE_LIMIT_MB:
-            logger.info(f"Sending video: {video_file} (size: {file_size_mb:.2f} MB)")
+            logger.info(f"កំពុងផ្ញើវីដេអូ: {video_file} (ទំហំ: {file_size_mb:.2f} MB)")
 
             with open(video_file, "rb") as f:
-                # --- Send video with updated caption ---
+                # --- ផ្ញើវីដេអូជាមួយចំណងជើងថ្មី ---
                 await update.message.reply_video(
                     video=f,
-                    caption=BOT_CAPTION,  # Updated to @Apple_Downloader_bot
+                    caption=BOT_CAPTION,
                     parse_mode=ParseMode.MARKDOWN,
                     supports_streaming=True,
                     read_timeout=100,
                     write_timeout=100,
                 )
             
-            # Delete the "Download finished" status message
+            # លុបសារស្ថានភាព "ទាញយករួចរាល់"
             await context.bot.delete_message(
                 chat_id=status_message.chat_id,
                 message_id=status_message.message_id
             )
 
         else:
-            # For videos > 50 MB
+            # សម្រាប់វីដេអូ > 50 MB
             permanent_path = DOWNLOAD_DIR / video_file.name
             shutil.move(video_file, permanent_path)
 
             await update.message.reply_text(
-                f"✅ Download complete, but file is too large to send.\n\n"
-                f"**Size:** {file_size_mb:.2f} MB\n"
-                f"**Limit:** {FILE_SIZE_LIMIT_MB} MB\n\n"
-                f"File saved to bot's server (storage is temporary).",
+                f"✅ ទាញយករួចរាល់ ប៉ុន្តែឯកសារធំពេកដើម្បីផ្ញើ។\n\n"
+                f"**ទំហំ:** {file_size_mb:.2f} MB\n"
+                f"**កំណត់:** {FILE_SIZE_LIMIT_MB} MB\n\n"
+                f"ឯកសារត្រូវបានរក្សាទុកនៅលើម៉ាស៊ីនមេរបស់បូត (កន្លែងផ្ទុកគឺបណ្តោះអាសន្ន)។",
                 parse_mode=ParseMode.MARKDOWN
             )
             await context.bot.delete_message(
@@ -224,14 +227,14 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     except yt_dlp.utils.DownloadError as e:
         logger.error(f"DownloadError: {str(e)}")
-        error_text = "❌ Error downloading video. The URL might be private or invalid."
+        error_text = "❌ កំហុសក្នុងការទាញយកវីដេអូ។ តំណអាចជាឯកជន ឬមិនត្រឹមត្រូវ។"
         error_msg = str(e).lower()
         if "confirm you're not a bot" in error_msg:
-            error_text = "❌ YouTube is blocking the download. Please try a different video or wait a bit."
+            error_text = "❌ TikTok កំពុងរារាំងការទាញយក។ សូមព្យាយាមវីដេអូផ្សេង ឬរង់ចាំបន្តិច។"
         elif "private video" in error_msg or "unavailable" in error_msg:
-            error_text = "❌ This video is private, age-restricted, or unavailable. Try another one."
+            error_text = "❌ វីដេអូនេះជាឯកជន មានកំណត់អាយុ ឬមិនអាចប្រើបាន។ សូមព្យាយាមវីដេអូផ្សេង។"
         elif "rate limit" in error_msg or "too many requests" in error_msg:
-            error_text = "❌ Rate limited by YouTube. Please wait 5-10 minutes and try again."
+            error_text = "❌ ត្រូវបានកំណត់អត្រាដោយ TikTok។ សូមរង់ចាំ 5-10 នាទី ហើយព្យាយាមម្តងទៀត។"
             
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
@@ -239,34 +242,34 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             text=error_text
         )
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"កំហុសមិនរំពឹងទុក: {str(e)}")
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
             message_id=status_message.message_id,
-            text=f"❌ An unexpected error occurred: {str(e)}. Please try again."
+            text=f"❌ កំហុសមិនរំពឹងទុកបានកើតឡើង: {str(e)}។ សូមព្យាយាមម្តងទៀត។"
         )
     finally:
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.info(f"Cleanup of temp directory: {temp_dir}")
+            logger.info(f"សម្អាតថតបណ្តោះអាសន្ន: {temp_dir}")
 
 
 def main() -> None:
-    """Initialize and run the Telegram bot."""
+    """ចាប់ផ្តើម និងដំណើរការ Telegram bot។"""
     global DOWNLOAD_DIR
     DOWNLOAD_DIR = Path("downloads")
     DOWNLOAD_DIR.mkdir(exist_ok=True)
-    logger.info(f"Using download directory: {DOWNLOAD_DIR.resolve()}")
+    logger.info(f"ប្រើថតទាញយក: {DOWNLOAD_DIR.resolve()}")
     
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    # --- Handler for text messages (URLs) ---
+    # --- គ្រប់គ្រងសម្រាប់សារអត្ថបទ (តំណ) ---
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_and_send))
     
-    # --- No audio handler ---
+    # --- គ្មានគ្រប់គ្រងសម្រាប់ audio ---
 
-    logger.info("Starting bot polling...")
+    logger.info("កំពុងចាប់ផ្តើម bot polling...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
