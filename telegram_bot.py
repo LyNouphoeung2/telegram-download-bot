@@ -46,7 +46,7 @@ BOT_CAPTION = "ដោនឡូតវីដេអូដោយ @Apple_Downloader_b
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """ផ្ញើសារស្វាគមន៍នៅពេលបញ្ជា /start ត្រូវបានប្រើ។"""
     await update.message.reply_text(
-        "សូមផ្ញើ Link video TikTok មកខ្ញុំ💚 ខ្ញុំនឹងទាញយកវីដេអូយ៉ាងច្បាស់ជូនអ្នក!"
+        "សូមផ្ញើ Link video TikTok ឬ Instagram ឬ YouTube មកខ្ញុំ💚 ខ្ញុំនឹងទាញយកវីដេអូយ៉ាងច្បាស់ជូនអ្នក!"
     )
 
 
@@ -175,9 +175,10 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("សូមផ្ញើតំណដែលត្រឹមត្រូវចាប់ផ្តើមដោយ http:// ឬ https://។")
         return
 
-    # ពិនិត្យថាជា TikTok link ឬអត់
-    if 'tiktok' not in url.lower():
-        await update.message.reply_text("សូមអភ័យទោស ខ្ញុំអាចទាញយកបានតែវីដេអូ TikTok ប៉ុណ្ណោះ")
+    # ពិនិត្យថាជា TikTok ឬ Instagram ឬ YouTube link ឬអត់
+    lower_url = url.lower()
+    if 'tiktok' not in lower_url and 'instagram' not in lower_url and 'youtube' not in lower_url and 'youtu.be' not in lower_url:
+        await update.message.reply_text("សូមអភ័យទោស ខ្ញុំអាចទាញយកបានតែវីដេអូ TikTok និង Instagram និង YouTube ប៉ុណ្ណោះ")
         return
 
     status_message = await update.message.reply_text("កំពុងទាញយកព័ត៌មានវីដេអូ... 🔄")
@@ -269,11 +270,11 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         error_text = "❌ កំហុសក្នុងការទាញយកវីដេអូ។ តំណអាចជាឯកជន ឬមិនត្រឹមត្រូវ។"
         error_msg = str(e).lower()
         if "confirm you're not a bot" in error_msg:
-            error_text = "❌ TikTok កំពុងរារាំងការទាញយក។ សូមព្យាយាមវីដេអូផ្សេង ឬរង់ចាំបន្តិច។"
+            error_text = "❌ វេទិកាកំពុងរារាំងការទាញយក។ សូមព្យាយាមវីដេអូផ្សេង ឬរង់ចាំបន្តិច។"
         elif "private video" in error_msg or "unavailable" in error_msg:
             error_text = "❌ វីដេអូនេះជាឯកជន មានកំណត់អាយុ ឬមិនអាចប្រើបាន។ សូមព្យាយាមវីដេអូផ្សេង។"
         elif "rate limit" in error_msg or "too many requests" in error_msg:
-            error_text = "❌ ត្រូវបានកំណត់អត្រាដោយ TikTok។ សូមរង់ចាំ 5-10 នាទី ហើយព្យាយាមម្តងទៀត។"
+            error_text = "❌ ត្រូវបានកំណត់អត្រាដោយវេទិកា។ សូមរង់ចាំ 5-10 នាទី ហើយព្យាយាមម្តងទៀត។"
             
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
