@@ -35,16 +35,16 @@ FFMPEG_PATH = "/usr/bin/ffmpeg"
 # ចំណងជើងសម្រាប់វីដេអូ ឬរូបភាព (ប្រើ HTML ដើម្បីធ្វើឲ្យ @username អាចចុចបាន)
 BOT_CAPTION = "ដោនឡូតវីដេអូដោយ <a href=\"https://t.me/Apple_Downloader_bot\">@Apple_Downloader_bot</a>"
 
-# វេទិកាដែលគាំទ្រ (*** បានធ្វើបច្ចុប្បន្នភាព ***)
+# វេទិកាដែលគាំទ្រ
 SUPPORTED_PLATFORMS = ['tiktok', 'instagram']
 
-# សារស្វាគមន៍សម្រាប់ /start (*** បានធ្វើបច្ចុប្បន្នភាព ***)
+# សារស្វាគមន៍សម្រាប់ /start
 WELCOME_MESSAGE = "សូមផ្ញើ Link (TikTok, Instagram) មកខ្ញុំ💚 ខ្ញុំនឹងទាញយកវីដេអូ ឬរូបភាព យ៉ាងច្បាស់ជូនអ្នក!"
 
 # សារប្រាប់ថាតំណមិនត្រឹមត្រូវ
 INVALID_URL_MESSAGE = "សូមផ្ញើតំណដែលត្រឹមត្រូវចាប់ផ្តើមដោយ http:// ឬ https://។"
 
-# សារប្រាប់ថាមិនគាំទ្រវេទិកា (*** បានធ្វើបច្ចុប្បន្នភាព ***)
+# សារប្រាប់ថាមិនគាំទ្រវេទិកា
 UNSUPPORTED_PLATFORM_MESSAGE = "សូមអភ័យទោស ខ្ញុំអាចទាញយកបានតែវីដេអូ និងរូបភាពពី TikTok និង Instagram ប៉ុណ្ណោះ"
 
 # សារស្ថានភាព
@@ -80,6 +80,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(WELCOME_MESSAGE)
 
 
+# *** អនុគមន៍នេះត្រូវបានធ្វើបច្ចុប្បន្នភាពទាំងស្រុង ***
 def run_download_blocking(
     url: str, temp_dir: str, loop, context, chat_id, message_id
 ) -> Tuple[Optional[Path], List[Path], dict]:
@@ -140,15 +141,30 @@ def run_download_blocking(
 
     ydl_opts_info = common_opts.copy()
     with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-        time.sleep(2) # បន្ថែមការផ្អាកបន្តិចដើម្បីជៀសវាង rate limit
+        time.sleep(1) # បន្ថែមការផ្អាកបន្តិច
         info = ydl.extract_info(url, download=False)
 
-    # ពិនិត្យមើលថាតើវាជាវីដេអូ ឬរូបភាព (slideshow)
-    # ប្រសិនបើ 'formats' ណាមួយមាន 'vcodec' (video codec) វាជាវីដេអូ
-    is_video = any(f.get('vcodec', 'none') != 'none' for f in info.get('formats', []))
+    # --- តក្កវិជ្ជាថ្មីសម្រាប់ពិនិត្យមើលប្រភេទ Post ---
+    is_video = False
+    
+    # Check 1: ប្រសិនបើវាមាន 'entries' វាជា slideshow រូបភាព
+    if info.get('entries'):
+        is_video = False
+        logger.info(f"បានរកឃើញ Post ប្រភេទរូបភាព (slideshow) សម្រាប់ {url}")
+    
+    # Check 2: ប្រសិនបើគ្មាន 'entries' សូមពិនិត្យមើល 'formats' សម្រាប់វីដេអូ
+    elif any(f.get('vcodec', 'none') != 'none' for f in info.get('formats', [])):
+        is_video = True
+        logger.info(f"បានរកឃើញ Post ប្រភេទវីដេអូ សម្រាប់ {url}")
+    
+    # Check 3: បើមិនដូច្នេះទេ វាជារូបភាពតែមួយ (ឧ. Instagram)
+    else:
+        is_video = False
+        logger.info(f"បានរកឃើញ Post ប្រភេទរូបភាពតែមួយ សម្រាប់ {url}")
+    # --- ចប់តក្កវិជ្ជាថ្មី ---
 
     if is_video:
-        # នេះជាវីដេអូ
+        # --- ការទាញយកវីដេអូ (មិនផ្លាស់ប្តូរ) ---
         ydl_opts = common_opts.copy()
         ydl_opts.update({
             'format': VIDEO_FORMAT,
@@ -168,23 +184,29 @@ def run_download_blocking(
         images = []
 
     else:
-        # នេះជា Post រូបភាព (slideshow)
+        # --- ការទាញយករូបភាព (បានកែតម្រូវ) ---
         ydl_opts = common_opts.copy()
         ydl_opts.update({
-            'outtmpl': str(temp_path / "%(id)s.%(ext)s"),
-            'write_all_thumbnails': True, # ទាញយករូបភាពទាំងអស់ក្នុង gallery
-            'skip_download': True,        # រំលងការទាញយក 'video' (ដែលជា slideshow)
+            # ប្រើ %(autonumber)s ដើម្បីរាប់លេខរូបភាព ក្នុងករណី slideshow
+            'outtmpl': str(temp_path / "%(id)s_%(autonumber)s.%(ext)s"),
             'progress_hooks': [progress_hook],
+            'skip_download': False # ត្រូវប្រាកដថាយើងទាញយករូបភាព
         })
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
-        # ប្រមូលរូបភាពទាំងអស់ដែលបានទាញយក (thumbnails)
-        images = list(temp_path.glob('*.jpg')) + list(temp_path.glob('*.jpeg')) + list(temp_path.glob('*.png'))
-        images.sort(key=lambda p: p.name)
+        # ប្រមូលរូបភាពទាំងអស់ (បន្ថែម .webp ព្រោះ TikTok ប្រើវា)
+        images = list(temp_path.glob('*.jpg')) + \
+                 list(temp_path.glob('*.jpeg')) + \
+                 list(temp_path.glob('*.png')) + \
+                 list(temp_path.glob('*.webp')) # បានបន្ថែម .webp
+        
+        images.sort(key=lambda p: p.name) # តម្រៀបតាមឈ្មោះ (e.g., ..._1, ..._2)
         video_file = None
 
     if video_file is None and not images:
+        logger.warning(f"yt-dlp download finished but no files found for {url}")
         raise FileNotFoundError("No video or images found after download")
 
     return video_file, images, info
@@ -255,31 +277,40 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await update.message.reply_text(NEXT_DOWNLOAD_MESSAGE)
             
             else:
-                # *** បានធ្វើបច្ចុប្បន្នភាព ***
-                # កុំរក្សាទុកឯកសារធំៗ! គ្រាន់តែផ្ញើសារប្រាប់
-                # finally: block នឹងសម្អាតវាដោយស្វ័យប្រវត្តិ
-                
-                # permanent_path = DOWNLOAD_DIR / video_file.name # (បានដកចេញ)
-                # shutil.move(video_file, permanent_path) # (បានដកចេញ)
-
+                # មិនរក្សាទុកឯកសារធំៗ (កូដនេះត្រឹមត្រូវពីមុន)
                 await update.message.reply_text(
                     FILE_TOO_LARGE_MESSAGE.format(size=file_size_mb, limit=FILE_SIZE_LIMIT_MB),
                     parse_mode=ParseMode.MARKDOWN
                 )
 
         elif images:
+            logger.info(f"កំពុងផ្ញើរូបភាព {len(images)} សន្លឹក សម្រាប់ {url}")
             await update.message.reply_text(IMAGE_SUCCESS_MESSAGE)
 
             media_group = []
             for i, img_path in enumerate(images):
-                caption = BOT_CAPTION if i == 0 else None
-                media_group.append(InputMediaPhoto(open(img_path, 'rb'), caption=caption, parse_mode=ParseMode.HTML if caption else None))
+                try:
+                    with open(img_path, 'rb') as f:
+                        # អាន file bytes ចូលទៅក្នុង memory
+                        # នេះគឺចាំបាច់ព្រោះ `finally` block នឹងលុប temp_dir
+                        # មុនពេល `reply_media_group` អាចបញ្ចប់ការផ្ញើ
+                        img_bytes = f.read()
+                    
+                    caption = BOT_CAPTION if i == 0 else None
+                    media_group.append(InputMediaPhoto(img_bytes, caption=caption, parse_mode=ParseMode.HTML if caption else None))
+                except Exception as e:
+                    logger.warning(f"មិនអាចដំណើរការរូបភាព {img_path}: {e}")
 
             # ផ្ញើរូបភាពជាក្រុម (albums)
             # Telegram ដាក់កម្រិត 10 រូបភាពក្នុងមួយក្រុម
             for i in range(0, len(media_group), 10):
                 chunk = media_group[i:i + 10]
-                await update.message.reply_media_group(media=chunk)
+                try:
+                    await update.message.reply_media_group(media=chunk)
+                except Exception as e:
+                    logger.error(f"មិនអាចផ្ញើ media group: {e}")
+                    await update.message.reply_text("❌ មានបញ្ហាក្នុងការផ្ញើស្លាយរូបភាពមួយចំនួន។")
+
 
             await update.message.reply_text(NEXT_DOWNLOAD_MESSAGE)
 
@@ -290,7 +321,7 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
     except yt_dlp.utils.DownloadError as e:
-        logger.error(f"DownloadError: {str(e)}")
+        logger.error(f"DownloadError: {str(e)} សម្រាប់ {url}")
         error_text = DEFAULT_ERROR_MESSAGE
         error_msg = str(e).lower()
         if "confirm you're not a bot" in error_msg:
@@ -306,7 +337,7 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             text=error_text
         )
     except Exception as e:
-        logger.error(f"កំហុសមិនរំពឹងទុក: {str(e)}")
+        logger.error(f"កំហុសមិនរំពឹងទុក: {str(e)} សម្រាប់ {url}")
         await context.bot.edit_message_text(
             chat_id=status_message.chat_id,
             message_id=status_message.message_id,
@@ -320,13 +351,6 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 def main() -> None:
-    # *** បានធ្វើបច្ចុប្បន្នភាព ***
-    # យើងលែងត្រូវការ DOWNLOAD_DIR ទៀតហើយ
-    # global DOWNLOAD_DIR
-    # DOWNLOAD_DIR = Path("downloads")
-    # DOWNLOAD_DIR.mkdir(exist_ok=True)
-    # logger.info(f"ប្រើថតទាញយក: {DOWNLOAD_DIR.resolve()}")
-    
     token = os.environ.get(BOT_TOKEN_ENV)
     if not token:
         logger.critical(f"មិនអាចរកឃើញ {BOT_TOKEN_ENV}! សូមតັ້ງ Environment Variable។")
